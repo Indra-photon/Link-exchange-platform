@@ -16,7 +16,7 @@ export const AvailablePostPublishStatus = Object.values(PostPublishStatusEnum)
 
 export const PostStatusEnum = {
     OPEN: "OPEN", 
-    CLOSED: "CLOESD",
+    CLOSED: "CLOSED",
 }
 export const AvailablePostStatus = Object.values(PostStatusEnum)
 

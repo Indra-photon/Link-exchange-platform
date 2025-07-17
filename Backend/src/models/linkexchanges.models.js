@@ -33,10 +33,10 @@ const linkExchangeSchema = new Schema({
         type: [Schema.Types.ObjectId],
         ref: 'Like',
         default: [],
-        number: {
-            type: Number,
-            default: 0
-        }
+    },
+    likecount: {
+        type: Number,
+        default: 0
     },
     type:{
         type: String,
@@ -46,18 +46,13 @@ const linkExchangeSchema = new Schema({
         type: [Schema.Types.ObjectId],
         ref: 'Connections',
         default: [],
-        number: {
-            type: Number,
-            default: 0
-        }
     },
-    messages:{
-        type: [Schema.Types.ObjectId],
-        ref: 'Message',
-        default: []   
+    connectcount:{
+        type: Number,
+        default: 0
     },
     review: {
-        type: number,
+        type: Number,
         default: 5
     },
     title:{

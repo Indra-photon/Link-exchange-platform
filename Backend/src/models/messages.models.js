@@ -47,4 +47,37 @@ const messageSchema = new Schema({
     }
 }, {timestamps: true})
 
+// Add these methods before export
+messageSchema.statics.validateConnection = async function(connectionId, senderId, receiverId) {
+    const connection = await mongoose.model('Connections').findOne({
+        _id: connectionId,
+        status: 'accepted',
+        $or: [
+            { requestedBy: senderId, requestedTo: receiverId },
+            { requestedBy: receiverId, requestedTo: senderId }
+        ]
+    });
+    
+    if (!connection) {
+        throw new Error('Connection not found, not accepted, or user not authorized');
+    }
+    
+    return connection;
+};
+
+// Pre-save validation
+messageSchema.pre('save', async function(next) {
+    try {
+        await this.constructor.validateConnection(
+            this.connectionId, 
+            this.sender, 
+            this.receiver
+        );
+        next();
+    } catch (error) {
+        next(error);
+    }
+});
+
+
 export const Message = mongoose.model("Message", messageSchema)

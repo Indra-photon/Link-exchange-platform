@@ -2,7 +2,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { Apierror } from "../utils/Apierror.js";
 import { Apiresponse } from "../utils/Apiresponse.js";
 import { User } from "../models/user.models.js";
-import { LinkExchange } from "../models/linkExchanges.models.js";
+import { LinkExchange } from "../models/linkexchanges.models.js";
 import { PostSubmission } from "../models/postsubmissions.models.js";
 import { PostPublishStatusEnum, AvailablePostPublishStatus } from '../utils/constants.js'
 import { PostStatusEnum, AvailablePostStatus } from '../utils/constants.js'
@@ -29,31 +29,17 @@ const submitLinkExchange = asyncHandler(async (req, res) => {
     // create a new link exchange submission
     const {title, DR, traffic, website, guidelines, pagetypes, tat, notes} = req.body;
 
-    // restrict Duplicate submissions - User submitting the same content multiple times
-    const existingSubmission = await PostSubmission.findOne({
-        submittedBy: user._id,
-        postType: 'link_exchange',
-        postdetails: {
-            title,
-            DR,
-            traffic,
-            website,
-            guidelines,
-            pagetypes,
-            tat,
-            notes
-        }
+    const linkExchangeSubmissions = await PostSubmission.countDocuments({
+    submittedBy: user._id,
+    postType: 'link_exchange'
     });
-    if (existingSubmission) {
-        throw new Apierror(400, "You have already submitted this link exchange");
-    }
 
     // check if the user is allowed due to subscription
-    if (user.subscription.tier === "free" && user.postsubmission.length >= submissionlimit.free.linkExchanges) {
+    if (user.subscription.tier === "free" && linkExchangeSubmissions >= submissionlimit.free.linkExchanges) {
         throw new Apierror(403, "You have reached the limit of link exchanges for your free subscription");
-    } else if (user.subscription.tier === "premium" && user.postsubmission.length >= submissionlimit.premium.linkExchanges) {
+    } else if (user.subscription.tier === "premium" && linkExchangeSubmissions >= submissionlimit.premium.linkExchanges) {
         throw new Apierror(403, "You have reached the limit of link exchanges for your premium subscription");
-    } else if (user.subscription.tier === "enterprise" && user.postsubmission.length >= submissionlimit.enterprise.linkExchanges) {
+    } else if (user.subscription.tier === "enterprise" && linkExchangeSubmissions >= submissionlimit.enterprise.linkExchanges) {
         throw new Apierror(403, "You have reached the limit of link exchanges for your enterprise subscription");
     }
     
@@ -86,8 +72,6 @@ const submitLinkExchange = asyncHandler(async (req, res) => {
         throw new Apierror(500, "Failed to update user with post submission");
     }
 
-    await user.save();
-    // send a success response
     return res
         .status(200)
         .json(
@@ -117,12 +101,21 @@ const getLinkExchanges = asyncHandler(async (req, res) => {
 
     // get all link exchanges whose PostPublishStatusEnum is published and the owner is the user
     const linkExchanges = await LinkExchange.find({ owner: user._id, publishstatus: PostPublishStatusEnum.PUBLISHED })
-        .populate("owner", "-password -refreshtoken")
-        .populate("connect", "-password -refreshtoken")
-        .populate("messages");
+    .populate("owner", "-password -refreshToken")
+    .populate({
+        path: "connect",
+        select: "requestedBy requestedTo status offer postid acceptedAt",
+        populate: {
+            path: "requestedBy requestedTo",
+            select: "fullname email"
+        }
+    })
 
     if (!linkExchanges || linkExchanges.length === 0) {
-        throw new Apierror(404, "No link exchanges found");
+        // return an empty array if no link exchanges are found
+        return res
+            .status(200)
+            .json(new Apiresponse(200, [], "No link exchanges found"));
     }
 
     return res
@@ -146,11 +139,22 @@ const getLinkExchangeById = asyncHandler(async (req, res) => {
     if (!user) {
         throw new Apierror(404, "User not found");
     }
-    // get the link exchange by id
-    const linkExchange = await LinkExchange.findById({owner: user._id, _id: req.params.id})
-        .populate("owner", "-password -refreshtoken")
-        .populate("connect", "-password -refreshtoken")
-        .populate("messages");
+
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        throw new Apierror(400, "Invalid link exchange ID");
+    }
+
+    const linkExchange = await LinkExchange.findOne({owner: user._id, _id: id})
+    .populate("owner", "-password -refreshToken")
+    .populate({
+        path: "connect",
+        select: "requestedBy requestedTo status offer postid acceptedAt",
+        populate: {
+            path: "requestedBy requestedTo",
+            select: "fullname email"
+        }
+    })
 
     if (!linkExchange) {
         throw new Apierror(404, "Link exchange not found");
@@ -179,8 +183,17 @@ const updateLinkExchange = asyncHandler(async (req, res) => {
     if (!user) {
         throw new Apierror(404, "User not found");
     }
-    // get the link exchange by id
-    const linkExchange = await LinkExchange.findById(req.params.id);
+    // Validate the ID parameter first
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        throw new Apierror(400, "Invalid link exchange ID");
+    }
+
+    // get the link exchange by id WITH ownership check
+    const linkExchange = await LinkExchange.findOne({
+        _id: id,
+        owner: user._id
+    });
     const postsubmissionid = linkExchange.postsubmission;
 
     if (!linkExchange) {
@@ -248,7 +261,7 @@ const updateLinkExchange = asyncHandler(async (req, res) => {
     // remove the link exchange from the user's link exchanges
     const removeLinkExchangeFromUser = await User.findByIdAndUpdate(
         user._id,
-        { $pull: { linkexchanges: req.params.id } },
+        { $pull: { linkExchanges: req.params.id } },
         { new: true }
     );
     if (!removeLinkExchangeFromUser) {
@@ -280,21 +293,24 @@ const deleteLinkExchange = asyncHandler(async (req, res) => {
     if (!user) {
         throw new Apierror(404, "User not found");
     }
-    // get the link exchange by id
-    const linkExchange = await LinkExchange.findById(req.params.id);
+    const { id } = req.params;
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        throw new Apierror(400, "Invalid link exchange ID");
+    }
+
+    const linkExchange = await LinkExchange.findOne({
+        _id: id,
+        owner: user._id
+    });
 
     if (!linkExchange) {
-        throw new Apierror(404, "Link exchange not found");
-    }
-    // check if the user is the owner of the link exchange
-    if (linkExchange.owner.toString() !== user._id.toString()) {
-        throw new Apierror(403, "You are not the owner of this link exchange");
+        throw new Apierror(404, "Link exchange not found or you don't have permission to delete it");
     }
     // if the user is the owner, delete the link exchange
     // first, delete the post submission associated with this link exchange
     const postSubmission = await PostSubmission.findById(linkExchange.postsubmission);
     if (postSubmission) {
-        await postSubmission.remove();
+        await PostSubmission.findByIdAndDelete(postSubmission._id);
     }
     // then, delete the link exchange
     await LinkExchange.deleteOne({ _id: req.params.id });   
@@ -311,7 +327,7 @@ const deleteLinkExchange = asyncHandler(async (req, res) => {
     // remove the linkexchange from user's linkexchanges
     const removelinkexchangefromuser = await User.findByIdAndUpdate(
         user._id,
-        { $pull: { linkexchanges: req.params.id } },
+        { $pull: { linkExchanges: req.params.id } },
         { new: true }
     );
     if (!removelinkexchangefromuser) {
@@ -408,15 +424,20 @@ const addLikeToLinkExchange = asyncHandler(async (req, res) => {
     if (!user) {
         throw new Apierror(404, "User not found");
     }
-    const linkexchnageid = req.body
-    if (!linkexchnageid || !linkexchnageid._id) {
-        throw new Apierror(400, "Link exchange id is required");
+    const { linkExchangeId } = req.params;
+    if (!linkExchangeId || !mongoose.Types.ObjectId.isValid(linkExchangeId)) {
+        throw new Apierror(400, "Valid link exchange ID is required");
     }
-    
-    const linkExchange = await LinkExchange.findById(linkexchnageid);
+
+    const linkExchange = await LinkExchange.findOne({
+        _id: linkExchangeId,
+        publishstatus: PostPublishStatusEnum.PUBLISHED
+    });
+
     if (!linkExchange) {
-        throw new Apierror(404, "Link exchange not found");
+        throw new Apierror(404, "Link exchange not found or not published");
     }
+
     // check if the user is the owner of the link exchange
     if (linkExchange.owner.toString() === user._id.toString()) {
         throw new Apierror(403, "You cannot like your own link exchange");
@@ -424,7 +445,7 @@ const addLikeToLinkExchange = asyncHandler(async (req, res) => {
 
     // check if the user has already liked the link exchange from the Like model
     const existingLike = await Like.findOne({
-        postId: linkExchange._id,
+        postId: linkExchangeId,
         likedBy: user._id,
         postType: 'link_exchange'
     });
@@ -433,7 +454,7 @@ const addLikeToLinkExchange = asyncHandler(async (req, res) => {
     }
     // if the user has not liked the link exchange, create a new like
     const newLike = await Like.create({
-        postId: linkExchange._id,
+        postId: linkExchangeId,
         likedBy: user._id,
         postType: 'link_exchange'
     });
@@ -442,7 +463,7 @@ const addLikeToLinkExchange = asyncHandler(async (req, res) => {
     }
     // add the like to the link exchange
     linkExchange.like.push(newLike._id);
-    linkExchange.like.number += 1; // increment the like count
+    linkExchange.likeCount += 1;
     
     try {
         const savelikedlinkexchange = await linkExchange.save();
@@ -491,15 +512,19 @@ const addConnectionsToLinkExchange = asyncHandler(async (req, res) => {
     if (!user) {
         throw new Apierror(404, "User not found");
     }
-    const linkexchnageid = req.body
-    if (!linkexchnageid || !linkexchnageid._id) {
-        throw new Apierror(400, "Link exchange id is required");
+    const { linkExchangeId } = req.params;
+    if (!linkExchangeId || !mongoose.Types.ObjectId.isValid(linkExchangeId)) {
+        throw new Apierror(400, "Valid link exchange ID is required");
     }
-    
-    // get the link exchange by id
-    const linkExchange = await LinkExchange.findById(linkexchnageid);
+
+    // get the link exchange by id with published check
+    const linkExchange = await LinkExchange.findOne({
+        _id: linkExchangeId,
+        publishstatus: PostPublishStatusEnum.PUBLISHED
+    });
+
     if (!linkExchange) {
-        throw new Apierror(404, "Link exchange not found");
+        throw new Apierror(404, "Link exchange not found or not published");
     }
     // check if the user is the owner of the link exchange
     if (linkExchange.owner.toString() === user._id.toString()) {
@@ -510,7 +535,7 @@ const addConnectionsToLinkExchange = asyncHandler(async (req, res) => {
     const existingConnection = await Connections.findOne({
         requestedBy: user._id,
         requestedTo: linkExchange.owner,
-        postid: linkExchange._id,
+        postid: linkExchangeId,
     });
     if (existingConnection) {
         throw new Apierror(400, "You have already connected to this link exchange");
@@ -520,7 +545,7 @@ const addConnectionsToLinkExchange = asyncHandler(async (req, res) => {
     const newConnection = await Connections.create({
         requestedBy: user._id,
         requestedTo: linkExchange.owner,
-        postid: linkExchange._id,
+        postid: linkExchangeId,
         status: ConnectionRequestSchemaEnum.PENDING,
         offer: offer
     });
@@ -531,7 +556,7 @@ const addConnectionsToLinkExchange = asyncHandler(async (req, res) => {
     try {
         // add the connection request to the link exchange
         linkExchange.connect.push(newConnection._id);
-        linkExchange.connect.number += 1; // increment the connection count
+        linkExchange.connectCount += 1; // increment the connection count
         // save the link exchange with the new connection
         const savedLinkExchange = await linkExchange.save();
         if (!savedLinkExchange) {
@@ -576,14 +601,23 @@ const updateConnectionRequestStatus = asyncHandler(async (req, res) => {
     if (!user) {
         throw new Apierror(404, "User not found");
     }
-    const linkexchnageid = req.body
-    if (!linkexchnageid || !linkexchnageid._id) {
-        throw new Apierror(400, "Link exchange id is required");
+    const { id } = req.params;
+    const { connectionId } = req.body;
+
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+        throw new Apierror(400, "Invalid link exchange ID");
     }
-    // get the link exchange by id
-    const linkExchange = await LinkExchange.findById(linkexchnageid);
+    if (!connectionId || !mongoose.Types.ObjectId.isValid(connectionId)) {
+        throw new Apierror(400, "Invalid connection ID");
+    }
+
+    const linkExchange = await LinkExchange.findOne({
+        _id: id,
+        owner: user._id
+    });
+
     if (!linkExchange) {
-        throw new Apierror(404, "Link exchange not found");
+        throw new Apierror(404, "Link exchange not found or you don't have permission");
     }
     // check if the user is the owner of the link exchange
     if (linkExchange.owner.toString() !== user._id.toString()) {
@@ -591,8 +625,9 @@ const updateConnectionRequestStatus = asyncHandler(async (req, res) => {
     }
     // check if the connection request exists
     const connectionRequest = await Connections.findOne({
+        _id: connectionId,
         requestedTo: user._id,
-        postid: linkExchange._id
+        postid: id
     });
     if (!connectionRequest) {
         throw new Apierror(404, "Connection request not found for this link exchange");
@@ -613,7 +648,6 @@ const updateConnectionRequestStatus = asyncHandler(async (req, res) => {
         connectionRequest.status = AvailableConnectionRequestStatus.ACCEPTED; // change status to accepted
         try {
             await connectionRequest.save();
-            linkExchange.connect.push(connectionRequest._id);
             linkExchange.connect.number += 1; // increment the connection count
             const savedLinkExchange = await linkExchange.save();
             if (!savedLinkExchange) {
@@ -644,7 +678,7 @@ const updateConnectionRequestStatus = asyncHandler(async (req, res) => {
             linkExchange.connect = linkExchange.connect.filter(
                 conn => conn.toString() !== connectionRequest._id.toString()
             );
-            linkExchange.connect.number -= 1; // decrement the connection count
+            linkExchange.connectCount -= 1;
             const savedLinkExchange = await linkExchange.save();
             if (!savedLinkExchange) {
                 throw new Apierror(500, "Failed to save link exchange with rejected connection");

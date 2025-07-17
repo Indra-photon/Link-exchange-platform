@@ -43,7 +43,7 @@ const userSchema = new Schema({
         default: false
     },
     role: {
-        type: string,
+        type: String,
         required: true,
     },
     user_role:{
@@ -65,42 +65,37 @@ const userSchema = new Schema({
         default: {"linkedin": "", "github": "", "twitter": "", "facebook": "","others": ""}
     },
     websites:{
-        type: [Schema.Types.Object],
+        type: [Schema.Types.ObjectId],
         ref: "userWebsites",
         default: []
     },
     linkExchanges:{
-        type: [Schema.Types.Object],
+        type: [Schema.Types.ObjectId],
         ref: "LinkExchange",
         default: []
     },
     contentCollabs:{
-        type: [Schema.Types.Object],
+        type: [Schema.Types.ObjectId],
         ref: "ContentCollab",
         default: []
     },
     newTools:{
-        type: [Schema.Types.Object],
+        type: [Schema.Types.ObjectId],
         ref: "NewTool",
         default: [] 
     },
     likedTo:{
-        type: [Schema.Types.Object],
+        type: [Schema.Types.ObjectId],
         ref: "Like",
         default: []         
     },
     connectionsTo:{
-        type: [Schema.Types.Object],
+        type: [Schema.Types.ObjectId],
         ref: "Connections",
         default: []
     },
-    messages:{
-        type: Schema.Types.Object,
-        ref: "Message",
-        default: []
-    },
     postsubmission:{
-        type: [Schema.Types.Object],
+        type: [Schema.Types.ObjectId],
         ref: "PostSubmission",
         default: []
     },
@@ -128,7 +123,7 @@ const userSchema = new Schema({
         }
     },
     allpostsid:{
-        type: array,
+        type: Array,
         default: []
     },
     accessToken: {
