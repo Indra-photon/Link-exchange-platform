@@ -3,9 +3,8 @@ import { ConnectionRequestSchemaEnum, AvailableConnectionRequestStatus } from '.
 
 const connectionsSchema = new Schema({
     requestedBy: {
-        type: [Schema.Types.ObjectId],
+        type: Schema.Types.ObjectId,
         ref: 'User',
-        default: [],
         required: true
     },
     requestedTo: {
